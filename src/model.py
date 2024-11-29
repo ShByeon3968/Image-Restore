@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from common import BaseNetwork
 
 class UNetGenerator(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -94,11 +95,10 @@ class EdgePredictor(nn.Module):
 class ColorizationNetwork(nn.Module):
     def __init__(self):
         super(ColorizationNetwork, self).__init__()
-        self.unet = UNetGenerator(in_channels=2, out_channels=3)  # Grayscale + Edge Map → RGB
+        self.unet = UNetGenerator(in_channels=1, out_channels=3)  # Grayscale + Edge Map → RGB
 
-    def forward(self, grayscale, edge_map):
-        x = torch.cat([grayscale, edge_map], dim=1)
-        return self.unet(x)
+    def forward(self, grayscale):
+        return self.unet(grayscale)
 
 
 # Inpainting Network with Contextual Attention
@@ -115,18 +115,20 @@ class ContextualAttentionInpainting(nn.Module):
     
 # 통합 파이프라인
 class ColorizationAndInpaintingPipeline(nn.Module):
-    def __init__(self):
+    def __init__(self,pretrain=True):
         super(ColorizationAndInpaintingPipeline, self).__init__()
-        self.edge_predictor = EdgePredictor()
         self.colorizer = ColorizationNetwork()
-        self.inpainter = ContextualAttentionInpainting()
+        if pretrain == True:
+            pretrain_model = torch.load('./src/pretrain/G0000000.pt',map_location="cuda")
+            inpainter_model = InpaintGenerator()
+            inpainter_model.load_state_dict(pretrain_model)
+            self.inpainter = inpainter_model
+        else:
+            self.inpainter = InpaintGenerator()
 
     def forward(self, grayscale_img, mask):
-        # Step 1: Edge Prediction
-        edge_map = self.edge_predictor(grayscale_img, mask)
-        
         # Step 2: Colorization
-        colored_img = self.colorizer(grayscale_img, edge_map)
+        colored_img = self.colorizer(grayscale_img)
         
         # Step 3: Inpainting
         final_img = self.inpainter(colored_img, mask)
@@ -156,3 +158,74 @@ class PatchGANDiscriminator(nn.Module):
     def forward(self, input_img, output_img):
         combined_img = torch.cat((input_img, output_img), 1)
         return self.model(combined_img)
+    
+class InpaintGenerator(BaseNetwork):
+    def __init__(self):  # 1046
+        super(InpaintGenerator, self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.ReflectionPad2d(3),
+            nn.Conv2d(4, 64, 7),
+            nn.ReLU(True),
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),
+            nn.ReLU(True),
+            nn.Conv2d(128, 256, 4, stride=2, padding=1),
+            nn.ReLU(True),
+        )
+
+        self.middle = nn.Sequential(*[AOTBlock(256,[1,2,4,8]) for _ in range(8)])
+
+        self.decoder = nn.Sequential(
+            UpConv(256, 128), nn.ReLU(True), UpConv(128, 64), nn.ReLU(True), nn.Conv2d(64, 3, 3, stride=1, padding=1)
+        )
+
+        self.init_weights()
+
+    def forward(self, x, mask):
+        x = torch.cat([x, mask], dim=1)
+        x = self.encoder(x)
+        x = self.middle(x)
+        x = self.decoder(x)
+        x = torch.tanh(x)
+        return x
+
+
+class UpConv(nn.Module):
+    def __init__(self, inc, outc, scale=2):
+        super(UpConv, self).__init__()
+        self.scale = scale
+        self.conv = nn.Conv2d(inc, outc, 3, stride=1, padding=1)
+
+    def forward(self, x):
+        return self.conv(F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=True))
+
+
+class AOTBlock(nn.Module):
+    def __init__(self, dim, rates):
+        super(AOTBlock, self).__init__()
+        self.rates = rates
+        for i, rate in enumerate(rates):
+            self.__setattr__(
+                "block{}".format(str(i).zfill(2)),
+                nn.Sequential(
+                    nn.ReflectionPad2d(rate), nn.Conv2d(dim, dim // 4, 3, padding=0, dilation=rate), nn.ReLU(True)
+                ),
+            )
+        self.fuse = nn.Sequential(nn.ReflectionPad2d(1), nn.Conv2d(dim, dim, 3, padding=0, dilation=1))
+        self.gate = nn.Sequential(nn.ReflectionPad2d(1), nn.Conv2d(dim, dim, 3, padding=0, dilation=1))
+
+    def forward(self, x):
+        out = [self.__getattr__(f"block{str(i).zfill(2)}")(x) for i in range(len(self.rates))]
+        out = torch.cat(out, 1)
+        out = self.fuse(out)
+        mask = my_layer_norm(self.gate(x))
+        mask = torch.sigmoid(mask)
+        return x * (1 - mask) + out * mask
+
+
+def my_layer_norm(feat):
+    mean = feat.mean((2, 3), keepdim=True)
+    std = feat.std((2, 3), keepdim=True) + 1e-9
+    feat = 2 * (feat - mean) / std - 1
+    feat = 5 * feat
+    return feat

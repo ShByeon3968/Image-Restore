@@ -8,6 +8,8 @@ import numpy as np
 from model import *
 from LossFunc import *
 from dataset import CustomImageDataset
+import os
+from torchvision.utils import save_image
 
 # Early Stopping Helper Class
 class EarlyStopping:
@@ -34,9 +36,12 @@ class EarlyStopping:
             self.best_loss = val_loss
             self.counter = 0
 
-EPOCH = 20
+EPOCH = 50
 BATCH_SIZE = 16
 
+# 샘플 저장 디렉토리
+sample_dir = "samples"
+os.makedirs(sample_dir, exist_ok=True)
 
 # 데이터 경로 설정
 input_dir = "./open/train_input_masked"
@@ -53,21 +58,20 @@ transform = transforms.Compose([
 train_dataset = CustomImageDataset(input_dir, gt_dir, mask_dir, transform=transform,mode='train')
 train_loader = DataLoader(train_dataset,BATCH_SIZE,shuffle=True)
 val_dataset = CustomImageDataset(input_dir, gt_dir, mask_dir, transform=transform,mode='val')
-val_loader = DataLoader(train_dataset,BATCH_SIZE,shuffle=True)
+val_loader = DataLoader(train_dataset,32,shuffle=True)
 
 
-model = ColorizationAndInpaintingPipeline().cuda()
+model = ColorizationAndInpaintingPipeline(True).cuda()
 discriminator = PatchGANDiscriminator().cuda()
 
 # 손실 함수 초기화
-criterion_edge = nn.BCEWithLogitsLoss()
 criterion_color = PerceptualLoss().cuda()
 criterion_inpaint_l1 = nn.L1Loss()
 criterion_gan = GANLoss()
 
 # 옵티마이저
-optimizer_gen = optim.Adam(model.parameters(), lr=1e-4)
-optimizer_disc = optim.Adam(discriminator.parameters(), lr=4e-4)
+optimizer_gen = optim.Adam(model.parameters(), lr= 5e-5)
+optimizer_disc = optim.Adam(discriminator.parameters(), lr=2e-4)
 scheduler_gen = optim.lr_scheduler.ReduceLROnPlateau(optimizer_gen, mode='min', factor=0.5, patience=5, verbose=True)
 scheduler_disc = optim.lr_scheduler.ReduceLROnPlateau(optimizer_disc, mode='min', factor=0.5, patience=5, verbose=True)
 
@@ -89,16 +93,11 @@ for epoch in range(EPOCH):
         input_image, gt_image, mask_image = input_image.cuda(), gt_image.cuda(), mask_image.cuda()
 
         # Forward pass
-        edge_pred = model.edge_predictor(input_image, mask_image)
-        colored_image = model.colorizer(input_image, edge_pred)
+        colored_image = model.colorizer(input_image)
         inpainted_image = model.inpainter(colored_image, mask_image)
-
-        # --- Edge Prediction Loss ---
-        edge_loss = criterion_edge(edge_pred, mask_image)
 
         # --- Colorization Loss ---
         color_loss = criterion_color(colored_image, gt_image)
-
         # --- Inpainting Loss (L1 Loss) ---
         inpaint_l1_loss = criterion_inpaint_l1(inpainted_image, gt_image)
 
@@ -118,7 +117,7 @@ for epoch in range(EPOCH):
         fake_output = discriminator(inpainted_image, input_image)
         gan_loss = criterion_gan(fake_output, True)
 
-        gen_loss = edge_loss + color_loss + inpaint_l1_loss + 0.1 * gan_loss
+        gen_loss = color_loss + inpaint_l1_loss + 0.2 * gan_loss
 
         optimizer_gen.zero_grad()
         gen_loss.backward()
@@ -129,7 +128,6 @@ for epoch in range(EPOCH):
         total_disc_loss += disc_loss.item()
 
         train_loader.set_postfix({
-            "Edge_Loss": edge_loss.item(),
             "Color_Loss": color_loss.item(),
             "Inpaint_L1_Loss": inpaint_l1_loss.item(),
             "GAN_Loss": gan_loss.item(),
@@ -148,13 +146,12 @@ for epoch in range(EPOCH):
             colored_image = model.colorizer(input_image, edge_pred)
             inpainted_image = model.inpainter(colored_image, mask_image)
 
-            edge_loss = criterion_edge(edge_pred, mask_image)
             color_loss = criterion_color(colored_image, gt_image)
             inpaint_l1_loss = criterion_inpaint_l1(inpainted_image, gt_image)
             fake_output = discriminator(inpainted_image, input_image)
             gan_loss = criterion_gan(fake_output, True)
 
-            gen_loss = edge_loss + color_loss + inpaint_l1_loss + 0.1 * gan_loss
+            gen_loss = color_loss + inpaint_l1_loss + 0.1 * gan_loss
             val_gen_loss += gen_loss.item()
 
     # 평균 Loss 계산
@@ -174,6 +171,28 @@ for epoch in range(EPOCH):
     if early_stopping.early_stop:
         print("Early stopping triggered. Training stopped.")
         break
+    
+    # 샘플 저장
+    with torch.no_grad():
+        sample_loader = DataLoader(train_dataset, batch_size=10, shuffle=True)
+        sample_images = next(iter(sample_loader))
+        sample_inputs, sample_gt, sample_masks = sample_images
+        sample_inputs, sample_masks = sample_inputs.cuda(), sample_masks.cuda()
+
+        sample_colored = model.colorizer(sample_inputs)
+        sample_inpainted = model.inpainter(sample_colored, sample_masks)
+
+        # 저장
+        for i in range(10):
+            save_image(
+                torch.cat([
+                    sample_inputs[i].repeat(3, 1, 1).cpu(),  # Grayscale → 3채널
+                    sample_masks[i].repeat(3, 1, 1).cpu(),  # Mask
+                    sample_gt[i].cpu(),                    # Ground Truth
+                    sample_inpainted[i].cpu()              # Generated Output
+                ], dim=2),
+                os.path.join(sample_dir, f"epoch_{epoch+1}_sample_{i+1}.png")
+            )
 
     # 최적의 모델 저장
     if avg_val_gen_loss < best_val_loss:
