@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from common import BaseNetwork
+from .common import BaseNetwork
+from torchvision import models
+from torch.nn.utils import spectral_norm
+from backbones_unet.model.unet import Unet
 
 class UNetGenerator(nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -80,22 +83,13 @@ class ContextualAttentionModule(nn.Module):
         x = F.relu(self.conv3(x))
         return self.conv4(x)
     
-# Edge Prediction Network
-class EdgePredictor(nn.Module):
-    def __init__(self):
-        super(EdgePredictor, self).__init__()
-        self.unet = UNetGenerator(in_channels=2, out_channels=1)  # Grayscale + Mask → Edge Map
-
-    def forward(self, img, mask):
-        x = torch.cat([img, mask], dim=1)
-        return self.unet(x)
 
 
 # Colorization Network
 class ColorizationNetwork(nn.Module):
     def __init__(self):
         super(ColorizationNetwork, self).__init__()
-        self.unet = UNetGenerator(in_channels=1, out_channels=3)  # Grayscale + Edge Map → RGB
+        self.unet = UNetGenerator(in_channels=3, out_channels=3)  # Grayscale + Edge Map → RGB
 
     def forward(self, grayscale):
         return self.unet(grayscale)
@@ -117,27 +111,34 @@ class ContextualAttentionInpainting(nn.Module):
 class ColorizationAndInpaintingPipeline(nn.Module):
     def __init__(self,pretrain=True):
         super(ColorizationAndInpaintingPipeline, self).__init__()
-        self.colorizer = ColorizationNetwork()
+        self.edge_map = None
+        self.inpaint_image = None
+        self.color_image = None
+
+        checkpoint = './best_model_1.pth'
+        inpaint_ckpt = './src/pretrain/G0000000.pt'
+        self.checkpoint = torch.load(checkpoint, map_location="cuda")
+        self.inpaint_ckpt = torch.load(inpaint_ckpt,map_location="cuda")
         if pretrain == True:
-            pretrain_model = torch.load('./src/pretrain/G0000000.pt',map_location="cuda")
-            inpainter_model = InpaintGenerator()
-            inpainter_model.load_state_dict(pretrain_model)
-            self.inpainter = inpainter_model
+            # Colorizer
+            self.colorizer = ColorizationNetwork()
+            colorizer_state_dict = {k.replace("colorizer.", ""): v for k, v in self.checkpoint.items() if k.startswith("colorizer.")}
+            self.colorizer.load_state_dict(colorizer_state_dict)
+
+            # Inpainter
+            self.inpainter = InpaintGenerator()
+            self.inpainter.load_state_dict(self.inpaint_ckpt)
         else:
+            self.colorizer = ColorizationNetwork()
             self.inpainter = InpaintGenerator()
 
-    def forward(self, grayscale_img, mask):
-        # Step 2: Colorization
-        colored_img = self.colorizer(grayscale_img)
+    def forward(self, x):
+        return x
         
-        # Step 3: Inpainting
-        final_img = self.inpainter(colored_img, mask)
-        
-        return final_img
     
 
 class PatchGANDiscriminator(nn.Module):
-    def __init__(self, in_channels=4):
+    def __init__(self, in_channels=4,out_channels=1):
         super(PatchGANDiscriminator, self).__init__()   
 
         def block(in_filters, out_filters, normalization=True):
@@ -152,7 +153,7 @@ class PatchGANDiscriminator(nn.Module):
             block(64, 128),
             block(128, 256),
             block(256, 512),
-            nn.Conv2d(512, 1, kernel_size=4, padding=1)
+            nn.Conv2d(512, out_channels, kernel_size=4, padding=1)
         )
 
     def forward(self, input_img, output_img):
@@ -229,3 +230,96 @@ def my_layer_norm(feat):
     feat = 2 * (feat - mean) / std - 1
     feat = 5 * feat
     return feat
+
+# ----- discriminator -----
+class Discriminator(BaseNetwork):
+    def __init__(
+        self,
+    ):
+        super(Discriminator, self).__init__()
+        inc = 3
+        self.conv = nn.Sequential(
+            spectral_norm(nn.Conv2d(inc, 64, 4, stride=2, padding=1, bias=False)),
+            nn.LeakyReLU(0.2, inplace=True),
+            spectral_norm(nn.Conv2d(64, 128, 4, stride=2, padding=1, bias=False)),
+            nn.LeakyReLU(0.2, inplace=True),
+            spectral_norm(nn.Conv2d(128, 256, 4, stride=2, padding=1, bias=False)),
+            nn.LeakyReLU(0.2, inplace=True),
+            spectral_norm(nn.Conv2d(256, 512, 4, stride=1, padding=1, bias=False)),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(512, 1, 4, stride=1, padding=1),
+        )
+
+        self.init_weights()
+
+    def forward(self, x):
+        feat = self.conv(x)
+        return feat
+
+
+############## Colorization Pretrain ##################
+class ColorizationNet(nn.Module):
+    def __init__(self, midlevel_input_size=128, global_input_size=512):
+        super(ColorizationNet, self).__init__()
+        # Fusion layer to combine midlevel and global features
+        self.midlevel_input_size = midlevel_input_size
+        self.global_input_size = global_input_size
+        self.fusion = nn.Linear(midlevel_input_size + global_input_size, midlevel_input_size)
+        self.bn1 = nn.BatchNorm1d(midlevel_input_size)
+
+        # Convolutional layers and upsampling
+        self.deconv1_new = nn.ConvTranspose2d(midlevel_input_size, 128, kernel_size=4, stride=2, padding=1)
+        self.conv1 = nn.Conv2d(midlevel_input_size, 128, kernel_size=3, stride=1, padding=1)
+        self.bn2 = nn.BatchNorm2d(128)
+        self.conv2 = nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1)
+        self.bn3 = nn.BatchNorm2d(64)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1)
+        self.bn4 = nn.BatchNorm2d(64)
+        self.conv4 = nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=1)
+        self.bn5 = nn.BatchNorm2d(32)
+        self.conv5 = nn.Conv2d(32, 2, kernel_size=3, stride=1, padding=1)
+        self.upsample = nn.Upsample(scale_factor=2)
+
+        print('Loaded colorization net.')
+
+    def forward(self, midlevel_input): #, global_input):
+        
+        # Convolutional layers and upsampling
+        x = F.relu(self.bn2(self.conv1(midlevel_input)))
+        x = self.upsample(x)
+        x = F.relu(self.bn3(self.conv2(x)))
+        x = F.relu(self.conv3(x))
+        x = self.upsample(x)
+        x = F.sigmoid(self.conv4(x))
+        x = self.upsample(self.conv5(x))
+        return x
+
+
+class ColorNet(nn.Module):
+    def __init__(self):
+        super(ColorNet, self).__init__()
+        
+        # Build ResNet and change first conv layer to accept single-channel input
+        resnet_gray_model = models.resnet18(num_classes=365)
+        resnet_gray_model.conv1.weight = nn.Parameter(resnet_gray_model.conv1.weight.sum(dim=1).unsqueeze(1).data)
+        
+        # Only needed if not resuming from a checkpoint: load pretrained ResNet-gray model
+        if torch.cuda.is_available(): # and only if gpu is available
+            resnet_gray_weights = torch.load('./src/pretrain/resnet_gray_weights.pth.tar') #torch.load('pretrained/resnet_gray.tar')['state_dict']
+            resnet_gray_model.load_state_dict(resnet_gray_weights)
+            print('Pretrained ResNet-gray weights loaded')
+
+        # Extract midlevel and global features from ResNet-gray
+        self.midlevel_resnet = nn.Sequential(*list(resnet_gray_model.children())[0:6])
+        self.global_resnet = nn.Sequential(*list(resnet_gray_model.children())[0:9])
+        self.fusion_and_colorization_net = ColorizationNet()
+
+    def forward(self, input_image):
+
+        # Pass input through ResNet-gray to extract features
+        midlevel_output = self.midlevel_resnet(input_image)
+        # global_output = self.global_resnet(input_image)
+
+        # Combine features in fusion layer and upsample
+        output = self.fusion_and_colorization_net(midlevel_output) #, global_output)
+        return output
