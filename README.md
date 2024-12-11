@@ -7,9 +7,14 @@ This repository has been created for submission to the DACON Image Restoration C
 ## 2. Architecture
 MaskMapGenerator (UNet) -> Colorization Network -> Inpaint Network
 
-## 3. Application
+## 3. LossFuction
+MaskMapGenerator (UNet): L2 Loss + Perceptual Loss
+Colorization Network: Perceptual Loss
+Inpaint Network: L1 Loss + GAN Loss
+
+## 4. Application
 <img src="mdsrc/App1.png">
 <img src="mdsrc/Plot.png">
 
-## 4. To-Do List
+## 5. To-Do List
 1. Image Inpainting Code Upload
