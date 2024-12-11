@@ -1,5 +1,5 @@
 # **Image-Restore**  
-🌟 **Revolutionizing Image Restoration through Deep Learning** 🌟  
+🌟 **Image Restoration through Deep Learning** 🌟  
 This repository is dedicated to the **DACON Image Restoration Competition**, aiming to restore vibrant **RGB images** from **damaged grayscale inputs** using state-of-the-art **deep learning techniques**.
 
 ---
