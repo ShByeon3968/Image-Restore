@@ -10,3 +10,6 @@ MaskMapGenerator (UNet) -> Colorization Network -> Inpaint Network
 ## 3. Application
 <img src="mdsrc/App1.png">
 <img src="mdsrc/Plot.png">
+
+## 4. To-Do List
+1. Image Inpainting Code Upload
