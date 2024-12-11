@@ -149,7 +149,7 @@ class TestImageDataset(CustomImageDataset):
         return image, os.path.basename(image_path)
     
 class ColorizationImageDataset(Dataset):
-    def __init__(self, input_dir, input_unmasked_dir,gt_dir, mask_dir, transform=None, mode='train', split_ratio=0.8):
+    def __init__(self, input_dir, transform=None):
         """
         Args:
             input_dir (str): Path to masked input images directory.
@@ -160,42 +160,15 @@ class ColorizationImageDataset(Dataset):
             split_ratio (float): Ratio of data to be used for training. Default is 0.7.
         """
         self.input_dir = input_dir
-        self.input_unmasked_dir = input_unmasked_dir
-        self.gt_dir = gt_dir
-        self.mask_dir = mask_dir
 
-        self.input_unmask = sorted(os.listdir(self.input_unmasked_dir))
         self.input_files = sorted(os.listdir(input_dir))
-        self.gt_files = sorted(os.listdir(gt_dir))
-        self.mask_files = sorted(os.listdir(mask_dir))
         self.transform = transform
-
-        # Split dataset into train and validation
-        total_samples = len(self.input_files)
-        train_count = int(total_samples * split_ratio)
-
-        if mode == 'train':
-            self.input_files = self.input_files[:train_count]
-            self.input_unmask = self.input_unmask[:train_count]
-            self.gt_files = self.gt_files[:train_count]
-            self.mask_files = self.mask_files[:train_count]
-        elif mode == 'val':
-            self.input_unmask = self.input_unmask[train_count:]
-            self.input_files = self.input_files[train_count:]
-            self.gt_files = self.gt_files[train_count:]
-            self.mask_files = self.mask_files[train_count:]
-        else:
-            raise ValueError("Mode must be 'train' or 'val'")
-
     def __len__(self):
         return len(self.input_files)
 
     def __getitem__(self, idx):
         # Load images
         input_path = os.path.join(self.input_dir, self.input_files[idx])
-        input_unmask_path = os.path.join(self.input_unmasked_dir, self.input_unmask[idx])
-        gt_path = os.path.join(self.gt_dir, self.gt_files[idx])
-        mask_path = os.path.join(self.mask_dir, self.mask_files[idx])
 
         image = util.load_img(input_path)
         (tens_l_orig, tens_l_rs) = util.preprocess_img(image, HW=(256,256))
