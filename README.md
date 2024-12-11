@@ -69,5 +69,3 @@ Below are visualizations showcasing the restoration pipeline's output and perfor
 
 ---
 
-💡 **Join Us on This Journey**  
-Whether you’re an enthusiast or an expert, contributions and feedback are always welcome! Together, let’s push the boundaries of image restoration.  
