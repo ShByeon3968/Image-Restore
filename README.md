@@ -1,20 +1,73 @@
-# Image-Restore
-This repository has been created for submission to the DACON Image Restoration Competition. The goal is to restore RGB images from damaged grayscale images using a deep learning-based approach.
+# **Image-Restore**  
+🌟 **Revolutionizing Image Restoration through Deep Learning** 🌟  
+This repository is dedicated to the **DACON Image Restoration Competition**, aiming to restore vibrant **RGB images** from **damaged grayscale inputs** using state-of-the-art **deep learning techniques**.
 
-## 1. Summarize
-손상된 GRAYSCALE 영상을 입력으로 받아 Mask Map을 추출 -> Colorization -> Inpainting을 수행하는 Application 프로젝트
+---
 
-## 2. Architecture
-MaskMapGenerator (UNet) -> Colorization Network -> Inpaint Network
+## **1. Project Overview**  
+Transform damaged grayscale images into fully restored and realistic RGB outputs through a cutting-edge application pipeline. The process involves:  
+1. Extracting a **Mask Map** from the damaged input.  
+2. **Colorizing** the grayscale image.  
+3. **Inpainting** missing or damaged regions.  
 
-## 3. LossFuction
-MaskMapGenerator (UNet): L2 Loss + Perceptual Loss
-Colorization Network: Perceptual Loss
-Inpaint Network: L1 Loss + GAN Loss
+---
 
-## 4. Application
-<img src="mdsrc/App1.png">
-<img src="mdsrc/Plot.png">
+## **2. System Architecture**  
+Our restoration pipeline employs a carefully designed **three-stage neural network architecture**:  
 
-## 5. To-Do List
-1. Image Inpainting Code Upload
+1. **Mask Map Generator**  
+   - Model: UNet  
+   - Task: Identifies regions of damage in the grayscale input.  
+
+2. **Colorization Network**  
+   - Task: Converts grayscale images into vibrant RGB outputs.  
+
+3. **Inpaint Network**  
+   - Task: Refines the image by filling in missing or damaged regions.  
+
+<p align="center">
+  <img src="mdsrc/Architecture.png" alt="System Architecture" width="75%">
+</p>
+
+---
+
+## **3. Loss Functions**  
+To achieve high-quality restoration, custom loss functions have been designed for each component:  
+
+- **Mask Map Generator (UNet)**:  
+  - **L2 Loss**: Measures pixel-wise reconstruction accuracy.  
+  - **Perceptual Loss**: Encourages structural consistency.  
+
+- **Colorization Network**:  
+  - **Perceptual Loss**: Focuses on visual realism and content preservation.  
+
+- **Inpaint Network**:  
+  - **L1 Loss**: Ensures pixel accuracy in reconstructions.  
+  - **GAN Loss**: Adds adversarial learning to improve naturalness.  
+
+---
+
+## **4. Application in Action**  
+Below are visualizations showcasing the restoration pipeline's output and performance:  
+
+<p align="center">
+  <img src="mdsrc/App1.png" alt="Application Preview" width="80%">
+</p>  
+
+<p align="center">
+  <img src="mdsrc/Plot.png" alt="Plot Result" width="80%">
+</p>  
+
+---
+
+## **5. To-Do List**  
+🔧 **Upcoming Enhancements:**  
+1. Upload the **Image Inpainting Code**.  
+2. Integrate advanced metrics for qualitative and quantitative evaluation.  
+3. Optimize the networks for faster inference.  
+4. Add pre-trained model weights and a demo script for users.  
+
+---
+
+💡 **Join Us on This Journey**  
+Whether you’re an enthusiast or an expert, contributions and feedback are always welcome! Together, let’s push the boundaries of image restoration.  
