@@ -25,9 +25,6 @@ Our restoration pipeline employs a carefully designed **three-stage neural netwo
 3. **Inpaint Network**  
    - Task: Refines the image by filling in missing or damaged regions.  
 
-<p align="center">
-  <img src="mdsrc/Architecture.png" alt="System Architecture" width="75%">
-</p>
 
 ---
 
